@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+venv/
+env/
+
+# Data
+data/
+*.csv
+submission.zip
+cols.txt
+log.txt
+
+# Models
+models/
+*.pkl
+
+# IDE
+.vscode/
+.idea/
