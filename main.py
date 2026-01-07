@@ -112,9 +112,71 @@ def predict():
     submission_format_dir = DATA_DIR / "submission_format"
     generate_submission(predictions, test_features, submission_format_dir)
 
+def train_ensemble():
+    print("Starting ENSEMBLE training pipeline...")
+    loader = DataLoader()
+    data = loader.load_train_data()
+    
+    # Split X, y
+    X = data.drop(columns=[TARGET_COL])
+    y = data[TARGET_COL]
+    
+    # Preprocess
+    preprocessor = Preprocessor()
+    X_processed = preprocessor.fit_transform(X)
+    
+    # Train Ensemble
+    from src.models.ensemble import EnsembleModel
+    ensemble = EnsembleModel()
+    ensemble.train(X_processed, y)
+    
+    # Save (Preprocessor needs to be saved too!)
+    # We save preprocessor as 'models/preprocessor.pkl'
+    # And ensemble models side by side
+    model_dir = Path("models")
+    model_dir.mkdir(exist_ok=True)
+    
+    joblib.dump(preprocessor.pipeline, model_dir / "preprocessor_ensemble.pkl")
+    ensemble.save_model(str(model_dir / "model.pkl")) # Will save _xgb and _lgbm
+    print("Ensemble Training Complete.")
+
+def predict_ensemble():
+    print("Starting ENSEMBLE prediction pipeline...")
+    loader = DataLoader()
+    test_features = loader.load_test_data()
+    
+    model_dir = Path("models")
+    preproc_path = model_dir / "preprocessor_ensemble.pkl"
+    
+    if not preproc_path.exists():
+        print("Ensemble not found! Run train-ensemble first.")
+        sys.exit(1)
+        
+    # Load Preprocessor
+    preprocessor_pipe = joblib.load(preproc_path)
+    X_test_proc = preprocessor_pipe.transform(test_features)
+    
+    # Load Ensemble
+    from src.models.ensemble import EnsembleModel
+    ensemble = EnsembleModel()
+    ensemble.load_model(str(model_dir / "model.pkl"))
+    
+    # Predict (Handles Log Transform internal or external?)
+    # EnsembleModel.predict returns blended raw output.
+    # XGBPipeline and LGBMPipeline handle exp internally IF we used the pipelines from src.
+    # Let's check src/models/ensemble.py
+    # It uses ModelPipeline and LGBMPipeline. Both have predict() that handles exp if config set.
+    # So ensemble.predict() returns Real Dollars.
+    
+    predictions = ensemble.predict(X_test_proc)
+    
+    # Generate Submission
+    submission_format_dir = DATA_DIR / "submission_format"
+    generate_submission(predictions, test_features, submission_format_dir)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["train", "predict", "validate", "tune"])
+    parser.add_argument("action", choices=["train", "predict", "validate", "tune", "validate-ensemble", "train-ensemble", "predict-ensemble"])
     args = parser.parse_args()
     
     if args.action == "train":
@@ -127,3 +189,10 @@ if __name__ == "__main__":
         from src.tune import tune
         # We could pass args.trials if we added that argument
         tune()
+    elif args.action == "validate-ensemble":
+        from src.validate_ensemble import validate_ensemble
+        validate_ensemble()
+    elif args.action == "train-ensemble":
+        train_ensemble()
+    elif args.action == "predict-ensemble":
+        predict_ensemble()

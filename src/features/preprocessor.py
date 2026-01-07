@@ -50,8 +50,28 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
         # Ensure numeric for aggregation targets
         if 'hsize' in temp_df.columns:
              temp_df['hsize'] = pd.to_numeric(temp_df['hsize'], errors='coerce')
+        
+        # Education Mapping
         if 'educ_max' in temp_df.columns:
-             temp_df['educ_max'] = pd.to_numeric(temp_df['educ_max'], errors='coerce')
+             # Standardize to years (Approximate)
+             edu_map = {
+                 'Never attended': 0,
+                 'Incomplete Primary': 3,
+                 'Complete Primary': 6,
+                 'Incomplete Secondary': 9,
+                 'Complete Secondary': 12,
+                 'Incomplete University': 14,
+                 'Complete University': 16,
+                 'Incomplete Technical': 14,
+                 'Complete Technical': 15,
+                 'Post-graduate': 18
+             }
+             # Map and coerce any failures to median or 0
+             # We use map then fillna with 0
+             temp_df['mapped_educ'] = temp_df['educ_max'].map(edu_map).fillna(0)
+             self.edu_map_ref = edu_map # Store for transform
+             # Use the mapped column for aggregation
+             temp_df['educ_max'] = temp_df['mapped_educ']
              
         # Reconstruct Region
         region_cols = [c for c in X.columns if c.startswith('region')]
@@ -127,7 +147,13 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
                     # Relative Feature: My Value / Regional Mean
                     # Avoid division by zero
                     if feature in X.columns:
-                         X[f'relative_{feature}'] = X[feature] / (mean_val + 1e-6)
+                         # Handle educ_max specially for relative calculation
+                         if feature == 'educ_max':
+                             current_val = X[feature].map(self.edu_map_ref).fillna(0) if hasattr(self, 'edu_map_ref') else pd.to_numeric(X[feature], errors='coerce').fillna(0)
+                         else:
+                             current_val = X[feature]
+                             
+                         X[f'relative_{feature}'] = current_val / (mean_val + 1e-6)
 
         # 4. Household Ratios
         if 'hsize' in X.columns:
