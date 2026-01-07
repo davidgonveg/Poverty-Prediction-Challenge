@@ -12,6 +12,8 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.pca = None
         self.enc = None
+        self.pca_cons = None
+        self.context_maps = {}
         self.asset_cols = []
         
     def fit(self, X, y=None):
@@ -28,6 +30,54 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
             self.pca = PCA(n_components=1)
             self.pca.fit(X_encoded)
             
+            # Generate wealth index strictly for internal aggregation calculation
+            wealth_index = self.pca.transform(X_encoded)[:, 0]
+        else:
+            wealth_index = np.zeros(len(X))
+
+        # --- Consumption PCA ---
+        consumed_cols = [c for c in X.columns if c.startswith('consumed')]
+        if consumed_cols:
+            X_cons = (X[consumed_cols] == 'Yes').astype(int)
+            self.pca_cons = PCA(n_components=3)
+            self.pca_cons.fit(X_cons)
+            
+        # --- Context Aggregates ---
+        # We need to construct temporary df to groupby
+        temp_df = X.copy()
+        temp_df['wealth_index'] = wealth_index
+        
+        # Ensure numeric for aggregation targets
+        if 'hsize' in temp_df.columns:
+             temp_df['hsize'] = pd.to_numeric(temp_df['hsize'], errors='coerce')
+        if 'educ_max' in temp_df.columns:
+             temp_df['educ_max'] = pd.to_numeric(temp_df['educ_max'], errors='coerce')
+             
+        # Reconstruct Region
+        region_cols = [c for c in X.columns if c.startswith('region')]
+        if region_cols:
+            temp_df['region_id'] = temp_df[region_cols].idxmax(axis=1)
+            
+            # Calculate Means
+            # We agg by Region + Urban (if available? Urban is 0/1 usually or string?)
+            # Let's stick to Region for robustness (Region includes Urban/Rural mix mostly)
+            # Actually dataset has 'urban' column. Grouping by ['region_id', 'urban'] is better.
+            
+            group_cols = ['region_id']
+            if 'urban' in temp_df.columns:
+                group_cols.append('urban')
+                
+            agg_targets = ['wealth_index', 'hsize', 'educ_max']
+            agg_targets = [t for t in agg_targets if t in temp_df.columns]
+            
+            # Create a combined key or just map using tuple? a bit complex for pandas map
+            # Simpler: Just Region for now to avoid sparsity
+            means = temp_df.groupby('region_id')[agg_targets].mean()
+            
+            self.context_maps = {}
+            for t in agg_targets:
+                self.context_maps[t] = means[t]
+            
         return self
 
     def transform(self, X):
@@ -39,24 +89,47 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
             X_encoded = self.enc.transform(X_assets)
             X['wealth_index'] = self.pca.transform(X_encoded)[:, 0]
             
-        # 2. Dietary Diversity Score
+        # 2. Consumption Pattern PCA (Lifestyle)
         # Consumed columns are 'Yes'/'No'
         consumed_cols = [c for c in X.columns if c.startswith('consumed')]
         if consumed_cols:
-            # Create a copy to avoid SettingWithCopy if we modify
-            # Map Yes->1, No->0. everything else->0
-            # We use apply map for speed on subset
-            def yes_no_mapper(val):
-                if isinstance(val, str):
-                    if val.lower() == 'yes': return 1
-                return 0
-                
-            # Vectorized mapping is faster
-            # But let's safe bet with simple replace
-            # Alternatively: (X[consumed_cols] == 'Yes').sum(axis=1)
-            X['dietary_diversity'] = (X[consumed_cols] == 'Yes').sum(axis=1)
+            # First, convert to binary (0/1) locally
+            # We can use vectorized because values are likely homogenous strings
+            # But let's be safe
+            X_cons = (X[consumed_cols] == 'Yes').astype(int)
             
-        # 3. Household Ratios
+            # Simple Sum (Dietary Diversity)
+            X['dietary_diversity'] = X_cons.sum(axis=1)
+            
+            # PCA on Consumption (if fitted)
+            if self.pca_cons:
+                 cons_pca = self.pca_cons.transform(X_cons)
+                 X['cons_comp1'] = cons_pca[:, 0]
+                 X['cons_comp2'] = cons_pca[:, 1]
+                 X['cons_comp3'] = cons_pca[:, 2]
+
+        # 3. Context Features (Aggregates by Region)
+        # Reconstruct Region ID from One-Hot
+        region_cols = [c for c in X.columns if c.startswith('region')]
+        if region_cols:
+            # argmax to get 0, 1, 2... representing region
+            # We add a temp 'region_id' column
+            X['region_id'] = X[region_cols].idxmax(axis=1)
+            
+            # Apply Aggregates (if fitted)
+            if self.context_maps:
+                # Map using index
+                for feature, mapping in self.context_maps.items():
+                    # mapping is a dict/series: region_id -> mean_value
+                    # We map X['region_id'] to get the mean
+                    mean_val = X['region_id'].map(mapping)
+                    X[f'mean_{feature}_by_region'] = mean_val
+                    # Relative Feature: My Value / Regional Mean
+                    # Avoid division by zero
+                    if feature in X.columns:
+                         X[f'relative_{feature}'] = X[feature] / (mean_val + 1e-6)
+
+        # 4. Household Ratios
         if 'hsize' in X.columns:
             # Force numeric
             X['hsize'] = pd.to_numeric(X['hsize'], errors='coerce').fillna(1)
