@@ -15,7 +15,7 @@ cols.txt
 log.txt
 
 # Models
-models/
+/models/
 *.pkl
 
 # IDE

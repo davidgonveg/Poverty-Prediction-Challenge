@@ -24,9 +24,10 @@ def generate_submission(predictions, test_features, submission_format_dir):
     # Note: example says 'household_id' but file likely has 'hhid' or we need to rename.
     # Let's check submission_format header again later, but safe bet is to follow example exact naming if possible.
     # Example: survey_id,household_id,per_capita_household_consumption
-    submission_cons = submission_cons.rename(columns={'hhid': 'household_id'})
+    # Rename explicitly to match submission_format: survey_id, hhid, cons_ppp17
+    submission_cons = submission_cons.rename(columns={'per_capita_household_consumption': 'cons_ppp17'})
     # Ensure column order
-    submission_cons = submission_cons[['survey_id', 'household_id', 'per_capita_household_consumption']]
+    submission_cons = submission_cons[['survey_id', 'hhid', 'cons_ppp17']]
     
     # Save
     cons_path = SUBMISSION_DIR / "predicted_household_consumption.csv"
@@ -46,7 +47,7 @@ def generate_submission(predictions, test_features, submission_format_dir):
     # We need 'weight' from test_features.
     # test_features has 'hhid' and 'weight'
     right_df = test_features[['hhid', 'weight']]
-    merged = pd.merge(submission_cons, right_df, left_on='household_id', right_on='hhid')
+    merged = pd.merge(submission_cons, right_df, on='hhid')
     
     survey_groups = merged.groupby('survey_id')
     
@@ -58,7 +59,7 @@ def generate_submission(predictions, test_features, submission_format_dir):
         
         for thresh_col, thresh_val in zip(threshold_cols, thresholds):
             # Sum weights where cons < thresh_val
-            w_below = group[group['per_capita_household_consumption'] < thresh_val]['weight'].sum()
+            w_below = group[group['cons_ppp17'] < thresh_val]['weight'].sum()
             row[thresh_col] = w_below / total_weight
             
         rows.append(row)

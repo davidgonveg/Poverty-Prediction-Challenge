@@ -2,3 +2,6 @@ pandas
 scikit-learn
 joblib
 numpy
+xgboost
+tqdm
+optuna

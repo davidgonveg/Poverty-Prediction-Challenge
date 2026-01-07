@@ -10,28 +10,34 @@ TEST_FEATURES = DATA_DIR / "test_hh_features.csv"
 SUBMISSION_DIR = DATA_DIR / "submission"
 SUBMISSION_DIR.mkdir(exist_ok=True)
 
+MODEL_PATH = "models/model.pkl"
+
 # Columns
 ID_COL = "hhid"
-SURVEY_COL = "strata" # Assuming strata identifies the survey or region roughly, closer inspection needed. Wait, problem says "three surveys (IDs 100000, 200000 and 300000)". 
-# Actually, looking at the data head from previous steps:
-# train_features: hhid, weight, strata... 
-# train_gt: survey_id, hhid, cons_pp (No, wait. Previous output showed: "hhid,com,weight,strata" for features, and "100004,1,375,4,824.617" which is confusing.
-# Let's re-verify column names in data loader step. 
-# BUT based on standard competition formats:
-SURVEY_ID_COL = "country" # Or similar. Let's start with 'strata' as placeholder or check headers again.
-# Wait, let's look at the previous `head` output for `train_hh_gt.csv`:
-# "survey_id,hhid,cons_pp" -> So survey_id is explicit there.
-# For `train_hh_features.csv`, the head was: "hhid,com,weight,strata". 
-# Wait, "com" looks like it might serve as survey_id or similar? 
-# The text says "surveys (IDs 100000, 200000 and 300000)". 
-# Let's assume there is a column for survey_id. 
-# I will output a config with placeholders and refine it after a quick check if needed.
-# Actually, I should use `run_command` to inspect headers again to be 100% sure for config.
+SURVEY_COL = "strata" 
+SURVEY_ID_COL = "country" 
 
 TARGET_COL = "cons_ppp17"
 WEIGHT_COL = "weight"
 
+# Flags
+USE_LOG_TARGET = True
+
+# XGBoost Params (Regularized - To Combat Overfitting)
+# Rationale: Previous tuning overfit (Train MAPE 6% vs Valid 30%).
+# We force simpler trees and penalize weights.
+XGB_PARAMS = {
+    'n_estimators': 1500, # Increased to compensate for lower LR
+    'learning_rate': 0.05, # Slower learning
+    'max_depth': 5, # Reduced from 8 to prevents specific memorization
+    'subsample': 0.6,
+    'colsample_bytree': 0.6,
+    'min_child_weight': 5, # Require more samples per leaf
+    'reg_alpha': 1.0, # L1 Regularization (Feature Selection)
+    'reg_lambda': 5.0, # L2 Regularization (Weight Penalty)
+    'n_jobs': -1,
+    'random_state': 42
+}
+
 # Random Seed
 RANDOM_SEED = 42
-
-MODEL_PATH = "models/baseline.pkl"
